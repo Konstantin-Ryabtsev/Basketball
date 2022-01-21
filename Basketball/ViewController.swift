@@ -16,36 +16,27 @@ class ViewController: UIViewController, ARSCNViewDelegate, SCNPhysicsContactDele
     @IBOutlet weak var scoreLabel: UILabel!
     
     // MARK: - Properties
-    let configuration = ARWorldTrackingConfiguration()
+    private let configuration = ARWorldTrackingConfiguration()
     
-    var isHoopAdded = false {
+    private var isHoopAdded = false {
         didSet {
             configuration.planeDetection = []
             sceneView.session.run(configuration, options: .removeExistingAnchors)
         }
     }
     
-    struct CollisionCategory: OptionSet {
-        let rawValue: Int
-
-        static let ball = CollisionCategory(rawValue: 1 << 0)
-        static let hoop = CollisionCategory(rawValue: 1 << 1)
-        static let board = CollisionCategory(rawValue: 1 << 2)
-        static let aboveHoop = CollisionCategory(rawValue: 1 << 4)
-        static let underHoop = CollisionCategory(rawValue: 1 << 8)
-    }
-    
-    var isPlaneAboveHoopTouched = false
-    var isPlaneUnderHoopTouched = false
-    
-    var isNewThrow = false {
+    private var isNewThrow = false {
         didSet {
             isPlaneAboveHoopTouched = false
             isPlaneUnderHoopTouched = false
         }
     }
-    var totalBalls = 0 { didSet { updateScoreLabel() } }
-    var score = 0 { didSet { updateScoreLabel() } }
+    
+    private var isPlaneAboveHoopTouched = false
+    private var isPlaneUnderHoopTouched = false
+    
+    private var score = 0 { didSet { updateScoreLabel() } }
+    private var totalBalls = 0 { didSet { updateScoreLabel() } }
     
     // MARK: - UIViewController
     override func viewDidLoad() {
@@ -119,45 +110,17 @@ class ViewController: UIViewController, ARSCNViewDelegate, SCNPhysicsContactDele
         let scene = SCNScene(named: "Hoop.scn", inDirectory: "art.scnassets")!
         
         let board = scene.rootNode.childNode(withName: "board", recursively: false)!.clone()
-        board.physicsBody = SCNPhysicsBody(
-            type: .static,
-            shape: SCNPhysicsShape(
-                node: board,
-                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
-            )
-        )
-        board.physicsBody?.categoryBitMask = CollisionCategory.board.rawValue
+        board.physicsBody = getPhysicsBody(for: board, category: CollisionCategory.board.rawValue)
         
         let hoop = scene.rootNode.childNode(withName: "hoop", recursively: false)!.clone()
-        hoop.physicsBody = SCNPhysicsBody(
-            type: .static,
-            shape: SCNPhysicsShape(
-                node: hoop,
-                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
-            )
-        )
-        hoop.physicsBody?.categoryBitMask = CollisionCategory.hoop.rawValue
+        hoop.physicsBody = getPhysicsBody(for: hoop, category: CollisionCategory.hoop.rawValue)
         
         let aboveHoop = scene.rootNode.childNode(withName: "aboveHoop", recursively: false)!.clone()
-        aboveHoop.physicsBody = SCNPhysicsBody(
-            type: .static,
-            shape: SCNPhysicsShape(
-                node: aboveHoop,
-                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
-            )
-        )
-        aboveHoop.physicsBody?.categoryBitMask = CollisionCategory.aboveHoop.rawValue
+        aboveHoop.physicsBody = getPhysicsBody(for: aboveHoop, category: CollisionCategory.aboveHoop.rawValue)
         aboveHoop.opacity = 0
         
         let underHoop = scene.rootNode.childNode(withName: "underHoop", recursively: false)!.clone()
-        underHoop.physicsBody = SCNPhysicsBody(
-            type: .static,
-            shape: SCNPhysicsShape(
-                node: underHoop,
-                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
-            )
-        )
-        underHoop.physicsBody?.categoryBitMask = CollisionCategory.underHoop.rawValue
+        underHoop.physicsBody = getPhysicsBody(for: underHoop, category: CollisionCategory.underHoop.rawValue)
         underHoop.opacity = 0
         
         //let hoopNode = scene.rootNode.clone()
@@ -168,6 +131,19 @@ class ViewController: UIViewController, ARSCNViewDelegate, SCNPhysicsContactDele
         hoopNode.addChildNode(underHoop)
         
         return hoopNode
+    }
+    
+    func getPhysicsBody(for node: SCNNode, category: Int) -> SCNPhysicsBody {
+        let physicsBody = SCNPhysicsBody(
+            type: .static,
+            shape: SCNPhysicsShape(
+                node: node,
+                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
+            )
+        )
+        physicsBody.categoryBitMask = category
+        
+        return physicsBody
     }
     
     func getPlaneNode(for anchor: ARPlaneAnchor) -> SCNNode {
