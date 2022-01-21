@@ -9,10 +9,11 @@ import UIKit
 import SceneKit
 import ARKit
 
-class ViewController: UIViewController, ARSCNViewDelegate {
+class ViewController: UIViewController, ARSCNViewDelegate, SCNPhysicsContactDelegate {
     
     // MARK: - Outlets
     @IBOutlet var sceneView: ARSCNView!
+    @IBOutlet weak var scoreLabel: UILabel!
     
     // MARK: - Properties
     let configuration = ARWorldTrackingConfiguration()
@@ -24,12 +25,35 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         }
     }
     
+    struct CollisionCategory: OptionSet {
+        let rawValue: Int
+
+        static let ball = CollisionCategory(rawValue: 1 << 0)
+        static let hoop = CollisionCategory(rawValue: 1 << 1)
+        static let board = CollisionCategory(rawValue: 1 << 2)
+        static let aboveHoop = CollisionCategory(rawValue: 1 << 4)
+        static let underHoop = CollisionCategory(rawValue: 1 << 8)
+    }
+    
+    var isPlaneAboveHoopTouched = false
+    var isPlaneUnderHoopTouched = false
+    
+    var isNewThrow = false {
+        didSet {
+            isPlaneAboveHoopTouched = false
+            isPlaneUnderHoopTouched = false
+        }
+    }
+    var totalBalls = 0 { didSet { updateScoreLabel() } }
+    var score = 0 { didSet { updateScoreLabel() } }
+    
     // MARK: - UIViewController
     override func viewDidLoad() {
         super.viewDidLoad()
         
         // Set the view's delegate
         sceneView.delegate = self
+        sceneView.scene.physicsWorld.contactDelegate = self
         
         // Show statistics such as fps and timing information
         sceneView.showsStatistics = true
@@ -71,6 +95,10 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Add physics body
         ballNode.physicsBody = SCNPhysicsBody(type: .dynamic, shape: SCNPhysicsShape(node: ballNode))
         
+        ballNode.physicsBody?.categoryBitMask = CollisionCategory.ball.rawValue
+        ballNode.physicsBody?.contactTestBitMask = CollisionCategory.aboveHoop.rawValue | CollisionCategory.underHoop.rawValue
+        ballNode.physicsBody?.collisionBitMask = CollisionCategory.board.rawValue | CollisionCategory.hoop.rawValue | CollisionCategory.ball.rawValue
+        
         // Calculate force for pushing the ball
         let power = Float(5)
         let x = -matrixCameraTransform.m31 * power
@@ -84,23 +112,60 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         // Assign camera positio to the ball
         ballNode.simdTransform = cameraTransform
         
-        
         return ballNode
     }
     
     func getHoopNode() -> SCNNode {
         let scene = SCNScene(named: "Hoop.scn", inDirectory: "art.scnassets")!
         
-        let hoopNode = scene.rootNode.clone()
-        
-        // Add physics body
-        hoopNode.physicsBody = SCNPhysicsBody(
+        let board = scene.rootNode.childNode(withName: "board", recursively: false)!.clone()
+        board.physicsBody = SCNPhysicsBody(
             type: .static,
             shape: SCNPhysicsShape(
-                node: hoopNode,
+                node: board,
                 options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
             )
         )
+        board.physicsBody?.categoryBitMask = CollisionCategory.board.rawValue
+        
+        let hoop = scene.rootNode.childNode(withName: "hoop", recursively: false)!.clone()
+        hoop.physicsBody = SCNPhysicsBody(
+            type: .static,
+            shape: SCNPhysicsShape(
+                node: hoop,
+                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
+            )
+        )
+        hoop.physicsBody?.categoryBitMask = CollisionCategory.hoop.rawValue
+        
+        let aboveHoop = scene.rootNode.childNode(withName: "aboveHoop", recursively: false)!.clone()
+        aboveHoop.physicsBody = SCNPhysicsBody(
+            type: .static,
+            shape: SCNPhysicsShape(
+                node: aboveHoop,
+                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
+            )
+        )
+        aboveHoop.physicsBody?.categoryBitMask = CollisionCategory.aboveHoop.rawValue
+        aboveHoop.opacity = 0
+        
+        let underHoop = scene.rootNode.childNode(withName: "underHoop", recursively: false)!.clone()
+        underHoop.physicsBody = SCNPhysicsBody(
+            type: .static,
+            shape: SCNPhysicsShape(
+                node: underHoop,
+                options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.concavePolyhedron]
+            )
+        )
+        underHoop.physicsBody?.categoryBitMask = CollisionCategory.underHoop.rawValue
+        underHoop.opacity = 0
+        
+        //let hoopNode = scene.rootNode.clone()
+        let hoopNode = SCNNode()
+        hoopNode.addChildNode(board)
+        hoopNode.addChildNode(hoop)
+        hoopNode.addChildNode(aboveHoop)
+        hoopNode.addChildNode(underHoop)
         
         return hoopNode
     }
@@ -132,6 +197,12 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         plane.width = CGFloat(anchor.extent.x)
         plane.height = CGFloat(anchor.extent.z)
     }
+    
+    func updateScoreLabel() {
+        DispatchQueue.main.async {
+            self.scoreLabel.text = "Scored \(self.score) goals out of \(self.totalBalls) shots"
+        }
+    }
 
     // MARK: - ARSCNViewDelegate
     func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
@@ -152,14 +223,44 @@ class ViewController: UIViewController, ARSCNViewDelegate {
         updatePlaneNode(node, for: planeAnchor)
     }
     
+    // MARK: - Physics World
+    
+    func physicsWorld(_ world: SCNPhysicsWorld, didEnd contact: SCNPhysicsContact) {
+        guard let nodeA = contact.nodeA.physicsBody?.categoryBitMask,
+              let nodeB = contact.nodeB.physicsBody?.categoryBitMask
+        else {
+            return
+        }
+        
+        if isNewThrow {
+            if nodeA == CollisionCategory.ball.rawValue && nodeB == CollisionCategory.aboveHoop.rawValue {
+                isPlaneAboveHoopTouched = true
+                //print("Above hoop touched: \(isPlaneAboveHoopTouched) and \(isPlaneUnderHoopTouched)")
+            }
+            
+            if nodeA == CollisionCategory.ball.rawValue && nodeB == CollisionCategory.underHoop.rawValue {
+                isPlaneUnderHoopTouched = true
+                //print("Under hoop touched: \(isPlaneAboveHoopTouched) and \(isPlaneUnderHoopTouched)")
+            }
+            
+            if isPlaneAboveHoopTouched && isPlaneUnderHoopTouched {
+                score += 1
+                isNewThrow = false
+            }
+        }
+    }
+    
     // MARK: - Actions
     @IBAction func userTapped(_ sender: UITapGestureRecognizer) {
         if isHoopAdded {
             // Get ball node
             guard let ballNode = getBall() else { return }
             
-            // Add ball to the camera position
+            // Add ball to the camera position and start new throw
             sceneView.scene.rootNode.addChildNode(ballNode)
+            isNewThrow = true
+            totalBalls += 1
+            
         } else {
             
             let location = sender.location(in: sceneView)
